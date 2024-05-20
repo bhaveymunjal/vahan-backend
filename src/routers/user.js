@@ -6,9 +6,6 @@ const bodyParser = require("body-parser");
 
 router.use(bodyParser.json());
 
-// Dynamic models storage
-const models = {};
-
 // Get all entities
 router.get("/all", async (req, res) => {
   try {
@@ -35,10 +32,10 @@ router.post("/new", async (req, res) => {
         modelAttributes[attr.name] = { type: DataTypes.STRING };
         break;
       case "number":
-        modelAttributes[attr.name] = { type: DataTypes.INTEGER };
+        modelAttributes[attr.name] = { type: DataTypes.BIGINT };
         break;
-      case "date":
-        modelAttributes[attr.name] = { type: DataTypes.DATE };
+      case "date": 
+        modelAttributes[attr.name] = { type: DataTypes.DATEONLY };
         break;
       case "boolean":
         modelAttributes[attr.name] = { type: DataTypes.BOOLEAN };
@@ -84,15 +81,14 @@ router.post("/:entity", async (req, res) => {
   data.createdAt = currentDate;
   data.updatedAt = currentDate;
 
-  // Construct the SET clause dynamically with properly quoted column names
   const setClause = Object.entries(data)
-    .map(([key, value]) => `\`${key}\` = '${value}'`) // Wrap column names in backticks
+    .map(([key, value]) => `\`${key}\` = '${value}'`)
     .join(", ");
 
   console.log(data);
   try {
     const [results] = await sequelize.query(
-      `INSERT INTO \`${entity}\` SET ${setClause}`, // Wrap table name in backticks
+      `INSERT INTO \`${entity}\` SET ${setClause}`,
       data
     );
     res.status(201).json({ id: results.insertId });
@@ -109,7 +105,7 @@ router.put("/:entity/:id", async (req, res) => {
   try {
     const currentDate = new Date().toISOString().slice(0, 19).replace("T", " ");
     const createdAt = await sequelize.query(
-      `SELECT createdAt FROM ${entity} WHERE id = ${id}`
+      `SELECT createdAt FROM \`${entity}\` WHERE id = ${id}`
     );
     data.createdAt = createdAt[0][0].createdAt
       .toISOString()
@@ -117,10 +113,10 @@ router.put("/:entity/:id", async (req, res) => {
       .replace("T", " ");
     data.updatedAt = currentDate;
     const setClause = Object.entries(data)
-      .map(([key, value]) => `${key} = '${value}'`)
+      .map(([key, value]) => `\`${key}\` = '${value}'`)
       .join(", ");
 
-    await sequelize.query(`UPDATE ${entity} SET ${setClause} WHERE id = ${id}`);
+    await sequelize.query(`UPDATE\`${entity}\` SET ${setClause} WHERE id = ${id}`);
     res.status(200).send("Record updated successfully");
   } catch (error) {
     console.error(
