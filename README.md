@@ -13,7 +13,7 @@ Before you begin, ensure you have met the following requirements:
 
 ```bash
 git clone https://github.com/bhaveymunjal/vahan-backend.git
-cd your-repo-name
+cd vahan-backend
 ```
 
 ### 2. Create a .env File
