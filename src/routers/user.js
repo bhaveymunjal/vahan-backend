@@ -1,183 +1,187 @@
-const express = require("express");
+const express = require('express');
 const router = express.Router();
-const sequelize = require("../db/sql.js");
-const { DataTypes } = require("sequelize");
-const bodyParser = require("body-parser");
+const con = require('../db/sql');
+const bodyParser = require('body-parser');
 
 router.use(bodyParser.json());
 
 // Get all entities
-router.get("/all", async (req, res) => {
+router.get('/all', async (req, res) => {
   try {
-    const [results] = await sequelize.query("SHOW TABLES");
+    const [results] = await con.query('SHOW TABLES');
     const tableNames = results.map((result) => Object.values(result)[0]);
     res.json(tableNames);
   } catch (error) {
-    console.error("Error fetching tables:", error);
-    res.status(500).send("Error fetching tables");
+    console.error('Error fetching tables:', error);
+    res.status(500).send('Error fetching tables');
   }
 });
 
 // Create a new entity
-router.post("/new", async (req, res) => {
+router.post('/new', async (req, res) => {
   const { name, attributes } = req.body;
   if (!name || !attributes)
-    return res.status(400).send("Name and attributes are required.");
+    return res.status(400).send('Name and attributes are required.');
 
-  // Define a new model
-  const modelAttributes = {};
+  // Build the CREATE TABLE query
+  let createTableQuery = `CREATE TABLE \`${name}\` (
+    \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+    \`createdAt\` DATETIME DEFAULT CURRENT_TIMESTAMP,
+    \`updatedAt\` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,`;
+  const columns = [];
   for (const attr of attributes) {
+    let columnDefinition;
     switch (attr.type) {
-      case "string":
-        modelAttributes[attr.name] = { type: DataTypes.STRING };
+      case 'string':
+        columnDefinition = `\`${attr.name}\` VARCHAR(255)`;
         break;
-      case "number":
-        modelAttributes[attr.name] = { type: DataTypes.BIGINT };
+      case 'number':
+        columnDefinition = `\`${attr.name}\` BIGINT`;
         break;
-      case "date": 
-        modelAttributes[attr.name] = { type: DataTypes.DATEONLY };
+      case 'date':
+        columnDefinition = `\`${attr.name}\` DATE`;
         break;
-      case "boolean":
-        modelAttributes[attr.name] = { type: DataTypes.BOOLEAN };
+      case 'boolean':
+        columnDefinition = `\`${attr.name}\` BOOLEAN`;
         break;
-      case "float":
-        modelAttributes[attr.name] = { type: DataTypes.FLOAT };
+      case 'float':
+        columnDefinition = `\`${attr.name}\` FLOAT`;
         break;
-      case "text":
-        modelAttributes[attr.name] = { type: DataTypes.TEXT };
+      case 'text':
+        columnDefinition = `\`${attr.name}\` TEXT`;
         break;
       default:
         return res.status(400).send(`Unsupported attribute type: ${attr.type}`);
     }
+    columns.push(columnDefinition);
   }
+  createTableQuery += columns.join(', ') + ');';
 
-  const model = sequelize.define(name, modelAttributes);
+  // Execute the query
   try {
-    await model.sync();
+    await con.query(createTableQuery);
     res.status(201).send(`Entity ${name} created.`);
   } catch (error) {
-    console.error(`Error creating record for entity ${name}:`, error);
-    res.status(500).send("Internal server error");
+    console.error(`Error creating table for entity ${name}:`, error);
+    res.status(500).send('Internal server error');
   }
 });
 
 // Get all records for an entity
-router.get("/:entity", async (req, res) => {
+router.get('/:entity', async (req, res) => {
   const { entity } = req.params;
   try {
-    const [results] = await sequelize.query(`SELECT * FROM ${entity}`);
+    const [results] = await con.query(`SELECT * FROM \`${entity}\``);
     res.json(results);
   } catch (error) {
     console.error(`Error fetching records for entity ${entity}:`, error);
-    res.status(500).send("Error fetching records");
+    res.status(500).send('Error fetching records');
   }
 });
 
 // Create a new record for an entity
-router.post("/:entity", async (req, res) => {
+router.post('/:entity', async (req, res) => {
   const { entity } = req.params;
   const data = req.body;
-  const currentDate = new Date().toISOString().slice(0, 19).replace("T", " ");
-  data.createdAt = currentDate;
-  data.updatedAt = currentDate;
+  data.createdAt = new Date().toISOString().slice(0, 19).replace('T', ' ');
+  data.updatedAt = data.createdAt;
 
-  const setClause = Object.entries(data)
-    .map(([key, value]) => `\`${key}\` = '${value}'`)
-    .join(", ");
+  const keys = Object.keys(data);
+  const values = Object.values(data);
+  const placeholders = keys.map(() => '?').join(', ');
 
-  console.log(data);
   try {
-    const [results] = await sequelize.query(
-      `INSERT INTO \`${entity}\` SET ${setClause}`,
-      data
+    const [results] = await con.query(
+      `INSERT INTO \`${entity}\` (${keys.join(', ')}) VALUES (${placeholders})`,
+      values
     );
     res.status(201).json({ id: results.insertId });
   } catch (error) {
     console.error(`Error creating record for entity ${entity}:`, error);
-    res.status(400).send(error.original.sqlMessage);
+    res.status(400).send(error.sqlMessage);
   }
 });
 
 // Update a record for an entity
-router.put("/:entity/:id", async (req, res) => {
+router.put('/:entity/:id', async (req, res) => {
   const { entity, id } = req.params;
   const data = req.body.data;
-  try {
-    const currentDate = new Date().toISOString().slice(0, 19).replace("T", " ");
-    const createdAt = await sequelize.query(
-      `SELECT createdAt FROM \`${entity}\` WHERE id = ${id}`
-    );
-    data.createdAt = createdAt[0][0].createdAt
-      .toISOString()
-      .slice(0, 19)
-      .replace("T", " ");
-    data.updatedAt = currentDate;
-    const setClause = Object.entries(data)
-      .map(([key, value]) => `\`${key}\` = '${value}'`)
-      .join(", ");
+  data.updatedAt = new Date().toISOString().slice(0, 19).replace('T', ' ');
 
-    await sequelize.query(`UPDATE\`${entity}\` SET ${setClause} WHERE id = ${id}`);
-    res.status(200).send("Record updated successfully");
+  // Remove createdAt from data to avoid updating it
+  delete data.createdAt;
+
+  const setClause = Object.entries(data)
+    .map(([key, value]) => `\`${key}\` = ?`)
+    .join(', ');
+  const values = [...Object.values(data), id]; // Pass only values without the object
+
+  const updateQuery = `UPDATE \`${entity}\` SET ${setClause} WHERE id = ?`;
+
+  console.log('Executing query:', updateQuery);
+  console.log('With values:', values);
+
+  try {
+    await con.query(updateQuery, values);
+    res.status(200).send('Record updated successfully');
   } catch (error) {
-    console.error(
-      `Error updating record for entity ${entity}:`,
-      error.original
-    );
-    res.status(400).send(error.original.sqlMessage);
+    console.error(`Error updating record for entity ${entity}:`, error);
+    res.status(400).send(error.sqlMessage);
   }
 });
 
+
 // Delete a record for an entity
-router.delete("/:entity/:id", async (req, res) => {
+router.delete('/:entity/:id', async (req, res) => {
   const { entity, id } = req.params;
   try {
-    await sequelize.query(`DELETE FROM ${entity} WHERE id = ${id}`);
+    await con.query(`DELETE FROM \`${entity}\` WHERE id = ?`, [id]);
     res.status(204).send();
   } catch (error) {
     console.error(`Error deleting record for entity ${entity}:`, error);
-    res.status(500).send("Error deleting record");
+    res.status(500).send('Error deleting record');
   }
 });
 
 // Get columns for an entity
-router.get("/columns/:entity", async (req, res) => {
+router.get('/columns/:entity', async (req, res) => {
   const { entity } = req.params;
   try {
-    const [results] = await sequelize.query(`DESC ${entity}`);
+    const [results] = await con.query(`DESC \`${entity}\``);
     // Extract column names and types
     const columns = results.map((result) => ({
       name: result.Field,
-      dataType: parseDataType(result.Type), // Implement parseDataType function
+      dataType: parseDataType(result.Type),
     }));
     res.json(columns);
   } catch (error) {
-    console.error("Error fetching column metadata:", error);
-    res.status(500).send("Error fetching column metadata");
+    console.error('Error fetching column metadata:', error);
+    res.status(500).send('Error fetching column metadata');
   }
 });
 
 // Function to parse SQL data type
 const parseDataType = (sqlType) => {
   if (
-    sqlType.includes("varchar") ||
-    sqlType.includes("char") ||
-    sqlType.includes("text")
+    sqlType.includes('varchar') ||
+    sqlType.includes('char') ||
+    sqlType.includes('text')
   ) {
-    return "text";
+    return 'text';
   } else if (
-    sqlType.includes("int") ||
-    sqlType.includes("decimal") ||
-    sqlType.includes("float")
+    sqlType.includes('int') ||
+    sqlType.includes('decimal') ||
+    sqlType.includes('float')
   ) {
-    return "number";
+    return 'number';
   } else if (
-    sqlType.includes("date") ||
-    sqlType.includes("time") ||
-    sqlType.includes("year")
+    sqlType.includes('date') ||
+    sqlType.includes('time') ||
+    sqlType.includes('year')
   ) {
-    return "date";
+    return 'date';
   } else {
-    return "text";
+    return 'text';
   }
 };
 
